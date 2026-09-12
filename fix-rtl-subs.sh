@@ -94,21 +94,21 @@ RLE, PDF = "‫", "‬"
 CANDIDATE_ENCODINGS = ("utf-8-sig", "cp1255", "cp1256", "iso-8859-8")
 
 def decode_content(raw):
-    """Try each candidate encoding; prefer one that actually surfaces RTL
-    text (a wrong-but-valid decode of Hebrew/Arabic bytes rarely does),
-    falling back to the first one that decodes cleanly at all."""
-    first_clean = None
-    for enc in CANDIDATE_ENCODINGS:
+    """utf-8 wins unconditionally if it decodes cleanly — a valid UTF-8 byte
+    sequence reinterpreted under a legacy single-byte codepage can easily
+    produce coincidental Hebrew-range mojibake (e.g. the UTF-8 bytes for
+    U+2122 TRADE MARK SIGN decode under cp1255 as a real Hebrew letter), so
+    "contains RTL chars" must never override a clean UTF-8 decode. Legacy
+    encodings are only tried once UTF-8 genuinely fails to decode at all."""
+    try:
+        return "utf-8-sig", raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    for enc in CANDIDATE_ENCODINGS[1:]:
         try:
-            text = raw.decode(enc)
+            return enc, raw.decode(enc)
         except UnicodeDecodeError:
             continue
-        if first_clean is None:
-            first_clean = (enc, text)
-        if RTL_CHAR.search(text):
-            return enc, text
-    if first_clean:
-        return first_clean
     return None, None
 
 def fix_file(path):
