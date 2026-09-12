@@ -87,14 +87,42 @@ BIDI_MARKS = (
 )
 RLE, PDF = "‫", "‬"
 
+# Legacy single-byte encodings still common for downloaded RTL subtitles.
+# Output is always rewritten as UTF-8 regardless of source encoding, since
+# the RLE/PDF fix requires real Unicode bidi control characters that a
+# single-byte codepage can't represent at all.
+CANDIDATE_ENCODINGS = ("utf-8-sig", "cp1255", "cp1256", "iso-8859-8")
+
+def decode_content(raw):
+    """Try each candidate encoding; prefer one that actually surfaces RTL
+    text (a wrong-but-valid decode of Hebrew/Arabic bytes rarely does),
+    falling back to the first one that decodes cleanly at all."""
+    first_clean = None
+    for enc in CANDIDATE_ENCODINGS:
+        try:
+            text = raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        if first_clean is None:
+            first_clean = (enc, text)
+        if RTL_CHAR.search(text):
+            return enc, text
+    if first_clean:
+        return first_clean
+    return None, None
+
 def fix_file(path):
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
+    with open(path, "rb") as f:
+        raw = f.read()
+    enc, content = decode_content(raw)
+    if content is None:
+        raise UnicodeDecodeError("all-candidates", raw, 0, 1,
+                                  f"couldn't decode with any of {CANDIDATE_ENCODINGS}")
     if not RTL_CHAR.search(content):
         return None  # not an RTL subtitle, leave untouched
 
     blocks = re.split(r"\n\s*\n", content.strip())
-    changed = False
+    changed = enc != "utf-8-sig"  # non-UTF-8 source always needs rewriting
     out = []
     for b in blocks:
         lines = b.strip().splitlines()
@@ -121,9 +149,14 @@ def fix_file(path):
     os.replace(tmp, path)
     return True
 
-fixed = already_ok = skipped_not_rtl = 0
+fixed = already_ok = skipped_not_rtl = failed = 0
 for path in sys.argv[1:]:
-    result = fix_file(path)
+    try:
+        result = fix_file(path)
+    except Exception as e:
+        failed += 1
+        print(f"FAIL:  {path} -- {e}", file=sys.stderr)
+        continue
     if result is None:
         skipped_not_rtl += 1
     elif result is False:
@@ -135,7 +168,7 @@ for path in sys.argv[1:]:
 
 print(
     f"\nfixed: {fixed}  already-ok: {already_ok}  "
-    f"not-rtl: {skipped_not_rtl}  total: {len(sys.argv)-1}",
+    f"not-rtl: {skipped_not_rtl}  failed: {failed}  total: {len(sys.argv)-1}",
     file=sys.stderr,
 )
 PYEOF
