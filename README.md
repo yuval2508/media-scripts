@@ -309,3 +309,13 @@ subs-to-hebrew.sh -a --whisper-fallback "/media/tv/Some Show"
 # A different target language than Hebrew
 subs-to-hebrew.sh -a -t fr "/media/tv/Some Show"
 ```
+
+## Credits
+
+Built by [Yuval Benjamin](https://github.com/yuval2508) working through a
+real subtitle pipeline for a personal media library, in collaboration with
+Claude (Anthropic) — including catching and fixing a couple of real bugs
+along the way (see `fix-rtl-subs.sh`'s and the extension-check note above).
+The commit history reflects this as it happened, not after the fact.
+
+MIT licensed - see `LICENSE`.
