@@ -24,11 +24,14 @@
 #
 # Runs, in order: extract-subs.sh -> [whisper-transcribe.sh] ->
 # translate-srt.sh -> cap-subtitle-duration.sh -> wrap-subtitle-lines.sh ->
-# fix-rtl-subs.sh. Every stage is independently safe to skip files it has
-# nothing to do for, so this is resumable the same way each stage is: killing
-# it partway through and re-running picks up wherever it left off.
-# fix-rtl-subs.sh always runs last regardless of TGT - it no-ops harmlessly
-# on non-RTL output.
+# fix-rtl-subs.sh -> [notify-jellyfin.sh]. Every stage is independently safe
+# to skip files it has nothing to do for, so this is resumable the same way
+# each stage is: killing it partway through and re-running picks up wherever
+# it left off. fix-rtl-subs.sh always runs last regardless of TGT - it
+# no-ops harmlessly on non-RTL output. The final Jellyfin notification only
+# runs if JELLYFIN_URL and JELLYFIN_TOKEN are set in the environment - see
+# notify-jellyfin.sh for what it does and why it's needed at all (some
+# players don't reliably pick up subtitle-only changes on their own).
 #
 # Examples:
 #   # Cheap path: only translate whatever's already embedded, whole library
@@ -139,5 +142,21 @@ run_stage "wrap-subtitle-lines.sh" \
 
 run_stage "fix-rtl-subs.sh" \
     "$SCRIPT_DIR/fix-rtl-subs.sh" "${FLAGS[@]}" "${SRT_ARGS[@]}"
+
+# Optional: tell Jellyfin to rescan, so it picks up the new subtitles right
+# away instead of waiting on its own schedule. Only runs if configured -
+# see notify-jellyfin.sh for the JELLYFIN_* environment variables.
+if [[ -n "${JELLYFIN_URL:-}" && -n "${JELLYFIN_TOKEN:-}" ]]; then
+    NOTIFY_ARGS=()
+    for a in "${ARGS[@]}"; do
+        if [[ -d "$a" ]]; then
+            NOTIFY_ARGS+=("$a")
+        else
+            NOTIFY_ARGS+=("$(dirname -- "$a")")
+        fi
+    done
+    run_stage "notify-jellyfin.sh" \
+        "$SCRIPT_DIR/notify-jellyfin.sh" "${NOTIFY_ARGS[@]}"
+fi
 
 echo "done." >&2

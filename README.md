@@ -26,6 +26,7 @@ its own, or a different target language than Hebrew.
 | [`cap-subtitle-duration.sh`](#cap-subtitle-durationsh) | Clip subtitle lines that linger on screen far longer than their text needs |
 | [`wrap-subtitle-lines.sh`](#wrap-subtitle-linessh) | Wrap long single-line subtitles into two balanced lines |
 | [`fix-rtl-subs.sh`](#fix-rtl-subssh) | Fix Hebrew/Arabic punctuation rendering on players that force LTR paragraph direction |
+| [`notify-jellyfin.sh`](#notify-jellyfinsh) | Tell a Jellyfin server to rescan a path after subtitles change, so it doesn't serve a stale cached version |
 | [`subs-to-hebrew.sh`](#subs-to-hebrewsh) | Orchestrator - runs all of the above in the right order for a whole show/library in one command |
 
 ## Prerequisites
@@ -267,6 +268,47 @@ fix-rtl-subs.sh "/media/tv/Some Show/S01E01.he.srt"
 fix-rtl-subs.sh -a /media/tv
 ```
 
+## notify-jellyfin.sh
+
+Some players don't reliably pick up subtitle-only file changes on their
+own, or an already-open playback session keeps using the subtitle stream it
+loaded at the start rather than noticing the file changed underneath it.
+This tells a Jellyfin server to rescan a path immediately, and handles two
+real gotchas found while building it:
+
+- **Jellyfin 12+ needs the full `Authorization: MediaBrowser ...` header**
+  with client/device fields - the older, simpler bare-API-key header gets
+  silently rejected with 401 on newer servers, even with a perfectly valid
+  key.
+- **Docker path remapping**: if Jellyfin runs in a container, the path it
+  needs is whatever the container sees (e.g. `/data/tvshows/...`), not the
+  host path (e.g. `/mnt/storage01/media/tv/...`) - these are commonly
+  different even though they point at the same files.
+
+Configuration is via environment variables, not flags, since they're the
+same for every call:
+
+```
+JELLYFIN_URL              base URL, e.g. http://192.168.0.2:8096 (required)
+JELLYFIN_TOKEN            API key from Settings -> Advanced -> API Keys (required)
+JELLYFIN_HOST_PREFIX      host-side path prefix to strip (optional)
+JELLYFIN_CONTAINER_PREFIX replacement prefix, as Jellyfin itself sees it (optional)
+```
+
+```bash
+export JELLYFIN_URL=http://192.168.0.2:8096
+export JELLYFIN_TOKEN=your-api-key-here
+export JELLYFIN_HOST_PREFIX=/mnt/storage01/media   # only needed for a
+export JELLYFIN_CONTAINER_PREFIX=/data              # containerized server
+
+notify-jellyfin.sh "/mnt/storage01/media/tv/Some Show/Season 01"
+```
+
+Restarting playback client-side (not just seeking/resuming) is still worth
+trying if a change doesn't seem to show up even after this - some clients
+cache the subtitle track for the lifetime of an already-open session
+regardless of what the server knows.
+
 ## subs-to-hebrew.sh
 
 Orchestrates the full pipeline in one command: `extract-subs.sh` →
@@ -296,7 +338,10 @@ Every stage is independently safe to skip files it has nothing to do for
 nothing to clean up → done), so this is resumable the same way each script
 already is — kill it partway through a big batch and re-run to pick up
 where it left off. `fix-rtl-subs.sh` always runs last regardless of `-t`,
-since it harmlessly no-ops on non-RTL output.
+since it harmlessly no-ops on non-RTL output. If `JELLYFIN_URL` and
+`JELLYFIN_TOKEN` are set in the environment, `notify-jellyfin.sh` runs
+automatically as a final step (see its own section above) - unset them (or
+just don't export them) to skip it.
 
 ```bash
 # The common case: whatever's already embedded, translated to Hebrew,
@@ -308,6 +353,11 @@ subs-to-hebrew.sh -a --whisper-fallback "/media/tv/Some Show"
 
 # A different target language than Hebrew
 subs-to-hebrew.sh -a -t fr "/media/tv/Some Show"
+
+# Also notify Jellyfin when done, so it doesn't serve a stale cached subtitle
+export JELLYFIN_URL=http://192.168.0.2:8096
+export JELLYFIN_TOKEN=your-api-key-here
+subs-to-hebrew.sh -a "/media/tv/Some Show"
 ```
 
 ## Credits
