@@ -16,6 +16,18 @@ For the common case - translating a whole library into Hebrew - use
 individual scripts are documented here for when you want a single stage on
 its own, or a different target language than Hebrew.
 
+## Scripts
+
+| Script | What it does |
+| --- | --- |
+| [`extract-subs.sh`](#extract-subssh) | Pull an already-embedded subtitle track out of a video file - the cheap, accurate option when one exists |
+| [`whisper-transcribe.sh`](#whisper-transcribesh) | Transcribe audio to `.srt` with faster-whisper, for files with nothing embedded |
+| [`translate-srt.sh`](#translate-srtsh) | Machine-translate an existing `.srt` into another language, keeping timestamps |
+| [`cap-subtitle-duration.sh`](#cap-subtitle-durationsh) | Clip subtitle lines that linger on screen far longer than their text needs |
+| [`wrap-subtitle-lines.sh`](#wrap-subtitle-linessh) | Wrap long single-line subtitles into two balanced lines |
+| [`fix-rtl-subs.sh`](#fix-rtl-subssh) | Fix Hebrew/Arabic punctuation rendering on players that force LTR paragraph direction |
+| [`subs-to-hebrew.sh`](#subs-to-hebrewsh) | Orchestrator - runs all of the above in the right order for a whole show/library in one command |
+
 ## Setup for the Whisper/translation scripts
 
 ```bash
