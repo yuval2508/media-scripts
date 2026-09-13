@@ -6,7 +6,7 @@
 # faster and more accurate than transcribing audio from scratch.
 #
 # Usage:
-#   whisper-transcribe.sh [-l LANG] [-m MODEL] [-o OUTDIR] [-a] [--force] FILE_OR_DIR...
+#   whisper-transcribe.sh [-l LANG] [-m MODEL] [-o OUTDIR] [-a] [--vad] [--force] FILE_OR_DIR...
 #
 #   -l LANG    language spoken in the audio, forced rather than auto-detected
 #              (ISO 639-1, e.g. en, ja, es; default: en). Forcing the known
@@ -18,6 +18,8 @@
 #              8-core CPU)
 #   -o OUTDIR  write output here instead of next to the source file
 #   -a         recurse into directories looking for *.mkv/*.mp4/*.m4v
+#   --vad      enable faster-whisper's VAD-based speech filtering (off by
+#              default - see CAVEAT below for why)
 #   --force    re-transcribe even if the output .LANG.srt already exists
 #
 # Output is written to <base>.<LANG>.srt next to the source file (or in
@@ -34,6 +36,17 @@
 # end time, making it linger on screen long after the speaker stopped. Run
 # cap-subtitle-duration.sh on the output afterward to clip that down to a
 # sane reading-speed-based duration.
+#
+# VAD is OFF by default based on a real, measured case: faster-whisper's
+# VAD-based speech-island detection can lose track of the audio-to-timeline
+# mapping partway through a file on some episodes, which manifests as either
+# large stretches of dialogue missing entirely, or (worse) surviving lines
+# getting assigned timestamps that drift from where they're actually spoken.
+# Disabling VAD cut one affected episode's missing-dialogue time by 85%.
+# Tradeoff: without VAD's silence-gating, the model occasionally repeats a
+# line back-to-back on ambiguous audio - this script deduplicates identical
+# consecutive lines automatically to offset that. Pass --vad to opt back
+# into the old behavior if a specific file seems to do better with it.
 
 set -euo pipefail
 
@@ -44,11 +57,12 @@ LANG_CODE="en"
 MODEL="small"
 OUTDIR=""
 RECURSE=0
+VAD=0
 FORCE=0
 FILES=()
 
 usage() {
-    grep '^#' "$0" | sed -n '2,26p' | sed 's/^# \{0,1\}//'
+    grep '^#' "$0" | sed -n '2,49p' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -58,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         -m) MODEL="$2"; shift 2 ;;
         -o) OUTDIR="$2"; shift 2 ;;
         -a) RECURSE=1; shift ;;
+        --vad) VAD=1; shift ;;
         --force) FORCE=1; shift ;;
         -h|--help) usage ;;
         --) shift; FILES+=("$@"); break ;;
@@ -102,6 +117,7 @@ fi
 export WT_LANG="$LANG_CODE"
 export WT_MODEL="$MODEL"
 export WT_OUTDIR="$OUTDIR"
+export WT_VAD="$VAD"
 export WT_FORCE="$FORCE"
 
 "$VENV_PY" - "${VIDEO_FILES[@]}" <<'PYEOF'
@@ -111,11 +127,23 @@ from faster_whisper import WhisperModel
 lang = os.environ["WT_LANG"]
 model_size = os.environ["WT_MODEL"]
 outdir = os.environ.get("WT_OUTDIR") or None
+use_vad = os.environ.get("WT_VAD") == "1"
 force = os.environ.get("WT_FORCE") == "1"
 
 def fmt(t):
     h = int(t // 3600); m = int((t % 3600) // 60); s = t % 60
     return f"{h:02d}:{m:02d}:{s:06.3f}".replace('.', ',')
+
+def dedupe_consecutive(segments):
+    """Drop a segment whose text exactly repeats the immediately preceding
+    one - an occasional artifact on ambiguous audio when VAD is disabled."""
+    prev_text = None
+    for seg in segments:
+        text = seg.text.strip()
+        if text == prev_text:
+            continue
+        prev_text = text
+        yield seg
 
 print(f"loading faster-whisper model '{model_size}'...", file=sys.stderr)
 model = WhisperModel(model_size, device="cpu", compute_type="int8")
@@ -136,7 +164,12 @@ for i, video in enumerate(videos, 1):
     tmp = out + ".tmp"
     t0 = time.time()
     try:
-        segments, info = model.transcribe(video, beam_size=5, vad_filter=True, language=lang)
+        transcribe_kwargs = dict(beam_size=5, vad_filter=use_vad, language=lang)
+        if not use_vad:
+            transcribe_kwargs["condition_on_previous_text"] = False
+        segments, info = model.transcribe(video, **transcribe_kwargs)
+        if not use_vad:
+            segments = dedupe_consecutive(segments)
         with open(tmp, "w", encoding="utf-8") as f:
             for j, seg in enumerate(segments, 1):
                 f.write(f"{j}\n{fmt(seg.start)} --> {fmt(seg.end)}\n{seg.text.strip()}\n\n")
