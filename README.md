@@ -11,6 +11,11 @@ Every script is self-contained bash and prints its own usage with `-h`.
 (`ffmpeg`, `ffprobe`, `jq`, `python3`). `whisper-transcribe.sh` and
 `translate-srt.sh` need the Python venv described below.
 
+For the common case - translating a whole library into Hebrew - use
+`subs-to-hebrew.sh` (below), which sequences all of these for you. The
+individual scripts are documented here for when you want a single stage on
+its own, or a different target language than Hebrew.
+
 ## Setup for the Whisper/translation scripts
 
 ```bash
@@ -212,29 +217,45 @@ fix-rtl-subs.sh "/media/tv/Some Show/S01E01.he.srt"
 fix-rtl-subs.sh -a /media/tv
 ```
 
-## Full pipeline, for a show with no embedded subs that needs translation
+## subs-to-hebrew.sh
 
-```bash
-ROOT="/media/tv/Some Show"
+Orchestrates the full pipeline in one command: `extract-subs.sh` →
+(optionally `whisper-transcribe.sh`) → `translate-srt.sh` →
+`cap-subtitle-duration.sh` → `wrap-subtitle-lines.sh` → `fix-rtl-subs.sh`.
+Despite the name, the target language is a flag, not hardcoded — it just
+defaults to the case this was built for.
 
-# 1. Grab anything that already has embedded subs - cheaper & more accurate
-extract-subs.sh -a "$ROOT"
+```
+subs-to-hebrew.sh [-s SRC] [-t TGT] [-m MODEL] [-a] [--whisper-fallback] [--force] FILE_OR_DIR...
 
-# 2. Transcribe whatever's left (skips files extract-subs.sh already covered)
-whisper-transcribe.sh -a -l en "$ROOT"
-
-# 3. Translate every English track to the target language
-translate-srt.sh -a -s en -t he "$ROOT"
-
-# 4. Clean up timing and line length on the whole result
-cap-subtitle-duration.sh -a "$ROOT"
-wrap-subtitle-lines.sh -a "$ROOT"
-
-# 5. If the target language is RTL, fix punctuation rendering last
-fix-rtl-subs.sh -a "$ROOT"
+  -s SRC              source language, ISO 639-1 (default: en)
+  -t TGT              target language, ISO 639-1 (default: he)
+  -m MODEL            faster-whisper model size, only used with
+                       --whisper-fallback (default: small)
+  -a                  recurse into directories (forwarded to every stage)
+  --whisper-fallback  for files with no embedded SRC track, transcribe the
+                       audio with Whisper instead of just skipping them.
+                       Off by default: transcription is slow and CPU-heavy,
+                       so a plain run only translates whatever's already
+                       embedded, at effectively no compute cost.
+  --force             forwarded to every stage
 ```
 
-Steps 2 and 3 can run concurrently in separate terminals for a big batch —
-pass `--wait` to `translate-srt.sh` so it polls for each file's transcript
-instead of exiting early, and translation keeps pace with transcription on
-the machine's spare CPU cores instead of running sequentially after it.
+Every stage is independently safe to skip files it has nothing to do for
+(no embedded track and no `--whisper-fallback` → nothing to translate →
+nothing to clean up → done), so this is resumable the same way each script
+already is — kill it partway through a big batch and re-run to pick up
+where it left off. `fix-rtl-subs.sh` always runs last regardless of `-t`,
+since it harmlessly no-ops on non-RTL output.
+
+```bash
+# The common case: whatever's already embedded, translated to Hebrew,
+# at no Whisper cost, across the whole library
+subs-to-hebrew.sh -a /media/tv
+
+# One show, also transcribing audio for episodes with nothing embedded
+subs-to-hebrew.sh -a --whisper-fallback "/media/tv/Some Show"
+
+# A different target language than Hebrew
+subs-to-hebrew.sh -a -t fr "/media/tv/Some Show"
+```

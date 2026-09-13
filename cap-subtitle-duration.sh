@@ -66,7 +66,10 @@ for f in "${FILES[@]}"; do
                 < <(find "$f" -maxdepth 1 -type f -iname '*.srt' -print0)
         fi
     elif [[ -f "$f" ]]; then
-        SRT_FILES+=("$f")
+        if [[ "$f" == *.[sS][rR][tT] ]]; then
+            SRT_FILES+=("$f")
+        fi
+        # else: silently ignore non-.srt files
     else
         echo "warn: skipping '$f' (not found)" >&2
     fi
