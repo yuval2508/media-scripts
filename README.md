@@ -1,4 +1,4 @@
-# media-scripts
+# Media-Scripts (Subtitles extraction)
 
 Personal shell scripts for managing a media library: pulling embedded
 subtitles out of video files, generating subtitles from audio when there's
