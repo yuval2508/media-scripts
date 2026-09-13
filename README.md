@@ -28,6 +28,35 @@ its own, or a different target language than Hebrew.
 | [`fix-rtl-subs.sh`](#fix-rtl-subssh) | Fix Hebrew/Arabic punctuation rendering on players that force LTR paragraph direction |
 | [`subs-to-hebrew.sh`](#subs-to-hebrewsh) | Orchestrator - runs all of the above in the right order for a whole show/library in one command |
 
+## Prerequisites
+
+These need to be actual system packages, not assumed present:
+
+```bash
+# Debian/Ubuntu
+sudo apt install ffmpeg jq python3 python3-venv
+
+# macOS (Homebrew)
+brew install ffmpeg jq python3
+```
+
+`ffmpeg`/`ffprobe` and `jq` are needed by `extract-subs.sh`,
+`cap-subtitle-duration.sh`, `wrap-subtitle-lines.sh`, and `fix-rtl-subs.sh`.
+`python3` (with a working `venv` module) is needed by all of those plus the
+setup below.
+
+**Gotcha hit while building this**: on Debian/Ubuntu, a plain `python3` can
+exist without `venv` actually working — `python3 -m venv` fails with
+`ensurepip is not available`, because the distro splits that out into a
+separate `python3.N-venv` package (e.g. `python3.12-venv`) that isn't
+always installed by default. `apt install python3-venv` (or the
+version-pinned name it points you to) fixes it. This is exactly why this
+repo's own venv ended up built with a Homebrew-installed Python instead of
+the system one on the machine this was first set up on — check
+`python3 --version` and `which python3` if venv creation below fails
+inexplicably; it may be silently falling back to a different Python than
+you expect.
+
 ## Setup for the Whisper/translation scripts
 
 ```bash
@@ -38,7 +67,16 @@ python3 -m venv .venvs/whisper-subs
 
 (CPU-only torch; drop the `--index-url` line if the machine has a CUDA GPU
 and you want to install the GPU build instead.) `.venvs/` is gitignored —
-each machine builds its own.
+each machine builds its own, so this step needs to be repeated on a fresh
+machine or after losing the local environment; nothing else in this repo
+depends on it existing beyond `whisper-transcribe.sh` and `translate-srt.sh`
+themselves refusing to run and telling you to create it.
+
+Both scripts download their model from Hugging Face on first use
+(`faster-whisper`'s `small` model is roughly 500MB; the `Helsinki-NLP`
+translation model is roughly 300MB) and cache it under `~/.cache/huggingface`
+- the very first run of each needs internet access and a minute or two;
+every run after that is fully offline.
 
 ## extract-subs.sh
 
