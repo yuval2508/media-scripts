@@ -6,7 +6,7 @@
 # faster and more accurate than transcribing audio from scratch.
 #
 # Usage:
-#   whisper-transcribe.sh [-l LANG] [-m MODEL] [-o OUTDIR] [-a] [--vad] [--force] FILE_OR_DIR...
+#   whisper-transcribe.sh [-l LANG] [-m MODEL] [-o OUTDIR] [-a] [--no-vad] [--force] FILE_OR_DIR...
 #
 #   -l LANG    language spoken in the audio, forced rather than auto-detected
 #              (ISO 639-1, e.g. en, ja, es; default: en). Forcing the known
@@ -18,8 +18,9 @@
 #              8-core CPU)
 #   -o OUTDIR  write output here instead of next to the source file
 #   -a         recurse into directories looking for *.mkv/*.mp4/*.m4v
-#   --vad      enable faster-whisper's VAD-based speech filtering (off by
-#              default - see CAVEAT below for why)
+#   --no-vad   disable faster-whisper's VAD-based speech filtering - a
+#              targeted fix for a specific known failure mode, NOT a
+#              general-purpose default (see CAVEAT below)
 #   --force    re-transcribe even if the output .LANG.srt already exists
 #
 # Output is written to <base>.<LANG>.srt next to the source file (or in
@@ -37,16 +38,21 @@
 # cap-subtitle-duration.sh on the output afterward to clip that down to a
 # sane reading-speed-based duration.
 #
-# VAD is OFF by default based on a real, measured case: faster-whisper's
+# --no-vad exists because of a real, measured case: faster-whisper's
 # VAD-based speech-island detection can lose track of the audio-to-timeline
 # mapping partway through a file on some episodes, which manifests as either
 # large stretches of dialogue missing entirely, or (worse) surviving lines
 # getting assigned timestamps that drift from where they're actually spoken.
-# Disabling VAD cut one affected episode's missing-dialogue time by 85%.
-# Tradeoff: without VAD's silence-gating, the model occasionally repeats a
-# line back-to-back on ambiguous audio - this script deduplicates identical
-# consecutive lines automatically to offset that. Pass --vad to opt back
-# into the old behavior if a specific file seems to do better with it.
+# Disabling VAD cut that specific episode's missing-dialogue time by 85%.
+#
+# It is NOT a safe default, though - measured on a different, already-good
+# episode (0.0s missing with VAD on), --no-vad regressed it to 49.9s
+# missing. VAD is on by default; use --no-vad only on episodes a coverage
+# check (see the project's find_gaps.py-style approach) has actually
+# flagged as bad, not preemptively across a whole batch. When used, the
+# model occasionally repeats a line back-to-back on ambiguous audio without
+# VAD's silence-gating - this script deduplicates identical consecutive
+# lines automatically to offset that.
 
 set -euo pipefail
 
@@ -57,12 +63,12 @@ LANG_CODE="en"
 MODEL="small"
 OUTDIR=""
 RECURSE=0
-VAD=0
+VAD=1
 FORCE=0
 FILES=()
 
 usage() {
-    grep '^#' "$0" | sed -n '2,49p' | sed 's/^# \{0,1\}//'
+    grep '^#' "$0" | sed -n '2,55p' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -72,7 +78,7 @@ while [[ $# -gt 0 ]]; do
         -m) MODEL="$2"; shift 2 ;;
         -o) OUTDIR="$2"; shift 2 ;;
         -a) RECURSE=1; shift ;;
-        --vad) VAD=1; shift ;;
+        --no-vad) VAD=0; shift ;;
         --force) FORCE=1; shift ;;
         -h|--help) usage ;;
         --) shift; FILES+=("$@"); break ;;
