@@ -1,18 +1,35 @@
 # media-scripts
 
 Personal shell scripts for managing a media library: pulling embedded
-subtitles out of video files, and fixing RTL (Hebrew/Arabic) subtitle
-rendering issues.
+subtitles out of video files, generating subtitles from audio when there's
+nothing embedded, machine-translating them, cleaning up common quality
+issues, and fixing RTL (Hebrew/Arabic) subtitle rendering issues.
 
-Both scripts are self-contained bash, print their own usage with `-h`, and
-only depend on tools already common on a media server (`ffmpeg`, `ffprobe`,
-`jq`, `python3`).
+Every script is self-contained bash and prints its own usage with `-h`.
+`extract-subs.sh`, `fix-rtl-subs.sh`, `cap-subtitle-duration.sh`, and
+`wrap-subtitle-lines.sh` only need tools already common on a media server
+(`ffmpeg`, `ffprobe`, `jq`, `python3`). `whisper-transcribe.sh` and
+`translate-srt.sh` need the Python venv described below.
+
+## Setup for the Whisper/translation scripts
+
+```bash
+python3 -m venv .venvs/whisper-subs
+.venvs/whisper-subs/bin/pip install faster-whisper transformers sentencepiece sacremoses
+.venvs/whisper-subs/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch
+```
+
+(CPU-only torch; drop the `--index-url` line if the machine has a CUDA GPU
+and you want to install the GPU build instead.) `.venvs/` is gitignored —
+each machine builds its own.
 
 ## extract-subs.sh
 
 Pulls the embedded subtitle track out of one or more MKV/MP4/M4V files using
 `ffprobe`/`ffmpeg`. Prefers a clean (non hearing-impaired) track, but falls
-back to an SDH/HI one if that's all a file has.
+back to an SDH/HI one if that's all a file has. Always try this before
+transcribing audio — it's faster and more accurate than Whisper when a
+usable track already exists.
 
 Text-based subtitle codecs (SubRip/ASS/SSA/MOV_TEXT/WebVTT) are converted to
 `.srt`. Image-based codecs are copied out in their native form instead
@@ -33,14 +50,111 @@ extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--force] FILE_
   --force      overwrite existing output files
 ```
 
-Examples:
-
 ```bash
 # Extract English subs from everything under a season folder
 extract-subs.sh -a "/media/tv/Some Show/Season 01"
 
 # Extract French subs, custom suffix, into a separate output dir
 extract-subs.sh -l fre -s fr -o /tmp/subs -a /media/tv/Some\ Show
+```
+
+## whisper-transcribe.sh
+
+For files with no usable embedded track: transcribes the audio into an
+`.srt` using `faster-whisper`, forcing the known spoken language (avoids
+misdetection from a foreign-language opening theme song before the real
+dialogue starts).
+
+```
+whisper-transcribe.sh [-l LANG] [-m MODEL] [-o OUTDIR] [-a] [--force] FILE_OR_DIR...
+
+  -l LANG    language spoken in the audio (ISO 639-1, e.g. en, ja; default: en)
+  -m MODEL   faster-whisper model size: tiny/base/small/medium/large-v3
+             (default: small - ~7-8x realtime on an 8-core CPU)
+  -o OUTDIR  write output here instead of next to the source file
+  -a         recurse into directories looking for *.mkv/*.mp4/*.m4v
+  --force    re-transcribe even if the output .LANG.srt already exists
+```
+
+Output goes to `<base>.<LANG>.srt`. Already-transcribed files are skipped,
+so a long batch job can be killed and re-run to resume where it left off —
+useful since a CPU-only run over a full season/series can take hours.
+
+```bash
+# Transcribe every episode in a season, forcing English, small model
+whisper-transcribe.sh -a -l en "/media/tv/Some Show/Season 03"
+```
+
+**Caveat**: Whisper's own segment timestamps aren't fully reliable on noisy
+or music-heavy audio — a short line can occasionally get a wildly inflated
+end time (a real observed case: "Gil's unbelievable." displayed for 56
+seconds because Whisper's segmentation swallowed a long stretch of
+theme-song audio into one segment). Chunked transcription and disabling VAD
+were both tried as fixes and only partially helped — accepted as a known
+CPU-only-small-model limitation rather than chasing it further with a
+bigger, much slower model. Run `cap-subtitle-duration.sh` afterward
+regardless of source to clip this down to something reasonable.
+
+## translate-srt.sh
+
+Machine-translates an existing `<base>.SRC.srt` (from either
+`extract-subs.sh` or `whisper-transcribe.sh`) into `<base>.TGT.srt`, keeping
+timestamps and only translating text.
+
+```
+translate-srt.sh -s SRC -t TGT [-a] [--force] [--wait] [--model NAME] FILE_OR_DIR...
+
+  -s SRC       source language code of the existing <base>.SRC.srt
+  -t TGT       target language code; output is <base>.TGT.srt
+  --model NAME Hugging Face translation model (default:
+               Helsinki-NLP/opus-mt-SRC-TGT - small, fast, CPU-friendly for
+               that specific pair; use something like
+               facebook/nllb-200-distilled-600M when there's no dedicated
+               opus-mt model for the pair, or for higher quality at the
+               cost of speed)
+  -a           recurse into directories looking for *.mkv/*.mp4/*.m4v
+  --force      re-translate even if the output already exists
+  --wait       poll every 30s for a not-yet-existing source .srt instead of
+               skipping - run this concurrently with a whisper-transcribe.sh
+               batch job (in a second terminal) so translation keeps pace
+               with transcription instead of waiting for it to finish first
+```
+
+```bash
+# Translate a season's English subs to Hebrew, waiting on transcription
+# running concurrently in another terminal
+translate-srt.sh -s en -t he -a --wait "/media/tv/Some Show/Season 03"
+```
+
+## cap-subtitle-duration.sh
+
+Clips subtitle blocks that display for far longer than their text needs
+down to a reading-speed-based maximum. Only ever shortens end times — start
+times (sync) are never touched.
+
+```
+cap-subtitle-duration.sh [-a] [--min SEC] [--max SEC] [--cps N] FILE_OR_DIR...
+
+  -a        recurse into directories looking for *.srt
+  --min SEC minimum display duration regardless of text length (default: 1.2)
+  --max SEC maximum display duration regardless of text length (default: 7.0)
+  --cps N   assumed reading speed, characters/second (default: 13.3)
+```
+
+Safe to re-run — it only ever shortens, so a second pass on already-capped
+durations is a no-op.
+
+## wrap-subtitle-lines.sh
+
+Wraps long single-line subtitle text into two balanced lines (finds the
+word boundary closest to the middle, rather than greedily filling the first
+line). Run this **before** `fix-rtl-subs.sh` if the target language is RTL.
+
+```
+wrap-subtitle-lines.sh [-a] [-w MAXWIDTH] FILE_OR_DIR...
+
+  -a          recurse into directories looking for *.srt
+  -w MAXWIDTH target max characters per line (default: 42)
 ```
 
 ## fix-rtl-subs.sh
@@ -62,19 +176,33 @@ The fix: wrap each subtitle line in an explicit RTL embedding
 (`U+202B` RLE ... `U+202C` PDF). That creates a hard directional scope that
 resolves correctly regardless of what the outer paragraph is forced to.
 
+Handles legacy single-byte encodings too (many downloaded Hebrew/Arabic
+`.srt` files are Windows-1255/1256 or ISO-8859-8, not UTF-8) — decodes with
+a fallback chain and always rewrites as UTF-8, since the RLE/PDF marks need
+real Unicode.
+
 ```
 fix-rtl-subs.sh [-a] FILE_OR_DIR...
 
   -a    recurse into directories looking for *.srt
 ```
 
-- Only touches files/lines that actually contain RTL-script characters
-  (Hebrew or Arabic block), so it's safe to run over a mixed-language
-  subtitle library — non-RTL files are left untouched.
+- Only touches files/lines that actually contain RTL-script characters, so
+  it's safe to run over a mixed-language subtitle library — non-RTL files
+  are left untouched.
+- **utf-8 always wins if it decodes cleanly, full stop.** An earlier version
+  of this script instead preferred whichever candidate encoding happened to
+  produce RTL-looking characters, which was a real, costly bug: a valid
+  UTF-8 multi-byte sequence (e.g. the bytes for `™`) reinterpreted
+  byte-by-byte under cp1255 can decode to a genuine Hebrew letter by pure
+  coincidence, so plain English (or any non-RTL) subtitle files containing
+  an ordinary special character got wrongly corrupted. Recovered by
+  reversing the deterministic encode/decode round-trip — but the lesson is:
+  never let "produces RTL-looking output" outrank a clean UTF-8 decode when
+  picking an encoding.
 - Idempotent: existing bidi marks (RLM/RLE/PDF/LRM/etc.) are stripped before
   re-wrapping, so re-running it is always safe and never stacks marks.
-
-Examples:
+- One bad/corrupt file doesn't abort the batch — it's reported and skipped.
 
 ```bash
 # Fix one file
@@ -84,25 +212,29 @@ fix-rtl-subs.sh "/media/tv/Some Show/S01E01.he.srt"
 fix-rtl-subs.sh -a /media/tv
 ```
 
-## Typical pipeline
+## Full pipeline, for a show with no embedded subs that needs translation
 
-For a show whose files have no embedded subtitles and need translated
-subtitles generated (e.g. via Whisper + a translation model), the general
-approach used to build these subtitles was:
+```bash
+ROOT="/media/tv/Some Show"
 
-1. `extract-subs.sh` first, for any files that already carry an embedded
-   track — cheaper and more accurate than transcribing audio.
-2. For files with nothing embedded, transcribe the audio (e.g.
-   `faster-whisper`, forcing the known source language) to produce an
-   `.en.srt`.
-3. Machine-translate the resulting `.en.srt` text into the target language,
-   keeping the original timestamps.
-4. If the target language is RTL (Hebrew/Arabic), run `fix-rtl-subs.sh` over
-   the output before it ever reaches a player.
+# 1. Grab anything that already has embedded subs - cheaper & more accurate
+extract-subs.sh -a "$ROOT"
 
-Whisper's segment timestamps aren't perfectly reliable on noisy/musical
-audio (occasional segments span far longer than the spoken line, or a
-following line's start timestamp lands a little early) — worth a
-reading-speed-based max-duration cap (~1.2s-7s per line, trimming end times
-only) and a long-line word-wrap (~42 chars/line, split at the most balanced
-word boundary) as post-processing steps regardless of source.
+# 2. Transcribe whatever's left (skips files extract-subs.sh already covered)
+whisper-transcribe.sh -a -l en "$ROOT"
+
+# 3. Translate every English track to the target language
+translate-srt.sh -a -s en -t he "$ROOT"
+
+# 4. Clean up timing and line length on the whole result
+cap-subtitle-duration.sh -a "$ROOT"
+wrap-subtitle-lines.sh -a "$ROOT"
+
+# 5. If the target language is RTL, fix punctuation rendering last
+fix-rtl-subs.sh -a "$ROOT"
+```
+
+Steps 2 and 3 can run concurrently in separate terminals for a big batch —
+pass `--wait` to `translate-srt.sh` so it polls for each file's transcript
+instead of exiting early, and translation keeps pace with transcription on
+the machine's spare CPU cores instead of running sequentially after it.
