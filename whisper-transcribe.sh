@@ -53,6 +53,20 @@
 # model occasionally repeats a line back-to-back on ambiguous audio without
 # VAD's silence-gating - this script deduplicates identical consecutive
 # lines automatically to offset that.
+#
+# UPDATE: every real use of --no-vad since has turned out to be the wrong
+# fix on closer inspection - it either regressed a section that was fine,
+# or "fixed" a coverage-check gap that wasn't actually missing dialogue at
+# all (VAD had correctly stayed silent over an instrumental/insert-song
+# passage; forcing a transcription there just hallucinated fake lyrics,
+# sometimes with real Japanese leaking through - the same theme-song
+# contamination pattern documented elsewhere in this project). A flagged
+# gap is not evidence of missing dialogue by itself - read or listen to
+# what's actually in that interval before reaching for --no-vad, since a
+# correctly-silent musical passage produces the exact same coverage-check
+# signature as real missing speech. As of 2026-09-15, VAD-on + the medium
+# model has been correct on every episode it's been checked against; treat
+# --no-vad as a last resort, not a routine option.
 
 set -euo pipefail
 
@@ -68,7 +82,7 @@ FORCE=0
 FILES=()
 
 usage() {
-    grep '^#' "$0" | sed -n '2,55p' | sed 's/^# \{0,1\}//'
+    grep '^#' "$0" | sed -n '2,69p' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
