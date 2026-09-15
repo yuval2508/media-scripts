@@ -4,6 +4,15 @@
 # extract-subs.sh or whisper-transcribe.sh) into another language, keeping
 # the original timestamps and only translating the text.
 #
+# Each subtitle block is split into individual sentences before translation
+# and rejoined after. This works around a real MarianMT (opus-mt) behavior:
+# given a multi-sentence input, it silently drops an entire sentence about
+# half the time instead of translating all of it - e.g. "Everything's
+# ready, Yukimaru. Time to go?" translated to just "Everything's ready,
+# Yukimaru." with the second sentence gone, no error, no truncation
+# warning. Translating one sentence at a time avoids feeding it
+# multi-sentence input in the first place.
+#
 # Usage:
 #   translate-srt.sh -s SRC -t TGT [-a] [--force] [--wait] [--model NAME] FILE_OR_DIR...
 #
@@ -44,7 +53,7 @@ WAIT=0
 FILES=()
 
 usage() {
-    grep '^#' "$0" | sed -n '2,26p' | sed 's/^# \{0,1\}//'
+    grep '^#' "$0" | sed -n '2,40p' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -143,6 +152,33 @@ def translate_batch(texts):
         out.extend(tok.batch_decode(gen, skip_special_tokens=True))
     return out
 
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+def split_sentences(text):
+    """Split a block's text into individual sentences. MarianMT silently
+    drops whole sentences from multi-sentence input about half the time, so
+    translating one sentence at a time (and rejoining after) avoids ever
+    handing it more than one."""
+    text = text.strip()
+    if not text:
+        return [""]
+    parts = [p for p in SENTENCE_SPLIT_RE.split(text) if p]
+    return parts or [text]
+
+def translate_entries(entries):
+    """Translate a list of (idx, ts, text) entries sentence-by-sentence,
+    batched across the whole file, then rejoin each entry's sentences."""
+    sentence_lists = [split_sentences(e[2]) for e in entries]
+    flat = [s for lst in sentence_lists for s in lst]
+    translated_flat = translate_batch(flat) if flat else []
+    out = []
+    pos = 0
+    for lst in sentence_lists:
+        n = len(lst)
+        out.append(" ".join(translated_flat[pos:pos + n]))
+        pos += n
+    return out
+
 videos = sys.argv[1:]
 total = len(videos)
 done = skipped = failed = 0
@@ -170,8 +206,7 @@ while pending:
         t0 = time.time()
         try:
             entries = parse_srt(src_srt)
-            texts = [e[2] for e in entries]
-            translated = translate_batch(texts) if texts else []
+            translated = translate_entries(entries) if entries else []
             with open(tmp, "w", encoding="utf-8") as f:
                 for (idx, ts, _), text in zip(entries, translated):
                     f.write(f"{idx}\n{ts}\n{text}\n\n")
