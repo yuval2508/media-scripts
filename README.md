@@ -21,6 +21,7 @@ its own, or a different target language than Hebrew.
 | Script | What it does |
 | --- | --- |
 | [`extract-subs.sh`](#extract-subssh) | Pull an already-embedded subtitle track out of a video file - the cheap, accurate option when one exists |
+| [`sync-subs.sh`](#sync-subssh) | Align an externally-sourced subtitle's timing to the actual video with `ffsubsync`, for tracks that didn't come from `extract-subs.sh` itself |
 | [`whisper-transcribe.sh`](#whisper-transcribesh) | Transcribe audio to `.srt` with faster-whisper, for files with nothing embedded |
 | [`translate-srt.sh`](#translate-srtsh) | Machine-translate an existing `.srt` into another language, keeping timestamps |
 | [`cap-subtitle-duration.sh`](#cap-subtitle-durationsh) | Clip subtitle lines that linger on screen far longer than their text needs |
@@ -112,6 +113,72 @@ extract-subs.sh -a "/media/tv/Some Show/Season 01"
 
 # Extract French subs, custom suffix, into a separate output dir
 extract-subs.sh -l fre -s fr -o /tmp/subs -a /media/tv/Some\ Show
+```
+
+## sync-subs.sh
+
+`extract-subs.sh`'s own output is always in sync, since it pulls the track
+straight out of the same file it plays alongside. This script is for the
+other case: a subtitle that came from somewhere else - a downloaded
+translation, or an independently-sourced Hebrew/Arabic track that `*arr`
+grabbed from a different release than the one actually on disk - which has
+no such guarantee and can run at a different offset, and even a slightly
+different framerate, than the video it's paired with.
+
+Uses [`ffsubsync`](https://github.com/smacke/ffsubsync) to align the given
+subtitle against the video's own embedded subtitle track when one exists
+(fast, precise), falling back to the video's audio via voice activity
+detection otherwise. Only timing is touched - text content, including any
+RTL marks from `fix-rtl-subs.sh`, is left alone.
+
+```
+sync-subs.sh [-s SUFFIX] [-a] [--vad VAD] [--no-backup] [--force] FILE_OR_DIR...
+
+  -s SUFFIX     subtitle filename suffix to sync, e.g. he in movie.he.srt
+                (default: he)
+  -a            recurse into directories looking for *.mkv/*.mp4/*.m4v with
+                a matching <base>.SUFFIX.srt sidecar
+  --vad VAD     force a specific ffsubsync VAD backend instead of letting it
+                choose (webrtc, auditok, subs_then_webrtc, ...)
+  --no-backup   don't keep a <sub>.bak copy of the pre-sync subtitle
+  --force       re-sync even if a .bak from a previous run already exists
+```
+
+A `.bak` next to the subtitle marks it as already handled and is skipped on
+a later run - the same resumable-batch convention `extract-subs.sh` uses for
+existing output. Don't assume one episode's correction applies to the whole
+season: a real run across one show found offsets from -2.05s to +1.38s
+across three consecutive episodes, so this always syncs per file rather than
+computing one offset and applying it everywhere.
+
+**Two things worth knowing from actually using this:**
+
+- `ffsubsync`'s offset estimate isn't perfectly stable between runs on the
+  same input - re-running it on an already-synced file can shift things
+  again rather than landing on ~0s, and in the cases checked (by comparing
+  against a semantically-matching line in a known-good reference subtitle)
+  the second pass ended up *more* accurate, off by under 100ms instead of
+  about a second. Reasonable to interpret as refinement rather than drift,
+  but it does mean the `.bak` skip is there for a real reason - don't loop
+  `--force` "just to be sure" without a reason to think the current sync is
+  actually wrong.
+- `ffsubsync` is a Python CLI tool, best installed with `pipx install
+  ffsubsync` rather than into this repo's `.venvs` (it's a standalone app,
+  not a library dependency of another script here). On a system with a
+  Homebrew-managed Python, plain `pip install` refuses with an
+  "externally-managed-environment" error by design (PEP 668) - `pipx`
+  handles the isolated-venv-per-app pattern that error message is steering
+  you toward. If `ffsubsync` installs but the command still isn't found
+  afterward, run `pipx ensurepath` and open a new shell - pipx installs to
+  `~/.local/bin`, which isn't always already on `PATH`.
+
+```bash
+# Sync Hebrew subs for a whole season against each episode's own video
+sync-subs.sh -a "/media/tv/Some Show/Season 13"
+
+# A different language/suffix, forcing audio-based sync over the default
+# (which prefers an embedded reference track when one exists)
+sync-subs.sh -s ar --vad webrtc -a /media/tv/Some\ Show
 ```
 
 ## whisper-transcribe.sh
