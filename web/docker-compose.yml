@@ -14,7 +14,7 @@ services:
       API_TOKEN: ${API_TOKEN:-}
       # Same path as on the host, so Jellyfin path remapping works unchanged.
       MEDIA_ROOT: /mnt/storage01/media
-      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_URL: ${JELLYFIN_URL:-http://192.168.0.2:8096}
       JELLYFIN_TOKEN: ${JELLYFIN_TOKEN:-}
       JELLYFIN_HOST_PREFIX: /mnt/storage01/media
       JELLYFIN_CONTAINER_PREFIX: ${JELLYFIN_CONTAINER_PREFIX:-/data}
