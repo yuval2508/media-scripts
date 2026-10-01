@@ -1,2 +1,5 @@
 .venvs/
 .claude/
+
+web/.env
+web/data/

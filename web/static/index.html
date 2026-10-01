@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subtitle Translator</title>
+<style>
+:root{--bg:#fafaf9;--card:#fff;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706}
+@media (prefers-color-scheme:dark){:root{--bg:#171717;--card:#1f1f1f;--fg:#f5f5f4;--muted:#a8a29e;--line:#333;--accent:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px}
+h1{font-size:20px;margin:8px 0 0}h2{font-size:15px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=password],select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+label.row{display:flex;gap:8px;align-items:center;margin:6px 0}
+label.row input{width:auto}
+.hint{color:var(--muted);font-size:13px}
+.crumb{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all;margin-bottom:8px}
+.list{border:1px solid var(--line);border-radius:6px;max-height:300px;overflow:auto}
+.item{padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+.item:last-child{border:0}.item:hover{background:var(--bg)}
+.item.video{color:var(--muted)}
+.job{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+.job:last-child{border:0}.job.sel{background:var(--bg)}
+.badge{font-size:12px;border-radius:99px;padding:1px 8px;border:1px solid currentColor}
+.queued{color:var(--muted)}.running{color:var(--accent)}.done{color:var(--ok)}.failed{color:var(--bad)}.cancelled{color:var(--warn)}
+pre{background:#0c0a09;color:#e7e5e4;border-radius:6px;padding:10px;max-height:380px;overflow:auto;font-size:12px;margin:8px 0 0;white-space:pre-wrap;word-break:break-all}
+.err{color:var(--bad)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>Subtitle Translator</h1><button class="ghost" id="logout" hidden>Change token</button></div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>1. Pick a folder or video</h2>
+      <div class="crumb" id="crumb"></div>
+      <div class="list" id="list"></div>
+      <p class="hint">Selected: <b id="selected">nothing</b></p>
+      <button class="ghost" id="useHere">Use this folder</button>
+    </section>
+
+    <section class="card">
+      <h2>2. Options</h2>
+      <label class="row"><input type="checkbox" id="recurse" checked> Include subfolders (e.g. all seasons)</label>
+      <div class="grid" style="gap:8px">
+        <div><div class="hint">Source language</div><input type="text" id="src" value="en"></div>
+        <div><div class="hint">Target language</div><input type="text" id="tgt" value="he"></div>
+      </div>
+      <label class="row"><input type="checkbox" id="whisper"> Transcribe audio when nothing is embedded</label>
+      <div id="modelRow" hidden>
+        <select id="model"></select>
+        <p class="hint">Slow: CPU-only Whisper can take hours per season. Leave off to translate only existing subtitle tracks.</p>
+      </div>
+      <label class="row"><input type="checkbox" id="clean"> Clean ads/markup from existing .srt files first</label>
+      <label class="row"><input type="checkbox" id="force"> Overwrite subtitles that already exist</label>
+      <label class="row" id="jfRow" hidden><input type="checkbox" id="jf"> Notify Jellyfin when done</label>
+      <p><button id="start" disabled>Start job</button> <span id="msg" class="err"></span></p>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Jobs</h2>
+    <div id="jobs" class="hint">No jobs yet.</div>
+    <div id="detail" hidden>
+      <div class="top"><b id="dtitle"></b><button class="ghost" id="cancel">Cancel job</button></div>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = null, sel = null, curDir = null, selJob = null, logOff = 0;
+try { token = localStorage.getItem('subs_token'); } catch (e) {}
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api' + path, {...opts, headers: {'X-API-Token': token || '', 'Content-Type': 'application/json'}});
+  if (r.status === 401) { askToken(); throw new Error('unauthorized'); }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+function askToken() {
+  const t = prompt('API token:');
+  if (t) { token = t; try { localStorage.setItem('subs_token', t); } catch (e) {} location.reload(); }
+}
+$('logout').onclick = () => { try { localStorage.removeItem('subs_token'); } catch (e) {} askToken(); };
+
+function setSel(p) { sel = p; $('selected').textContent = p || 'nothing'; $('start').disabled = !p; }
+$('useHere').onclick = () => setSel(curDir);
+$('whisper').onchange = e => $('modelRow').hidden = !e.target.checked;
+
+async function browse(path) {
+  const d = await api('/browse?path=' + encodeURIComponent(path || ''));
+  curDir = d.path; $('crumb').textContent = d.path;
+  const list = $('list'); list.innerHTML = '';
+  const add = (label, type, fn) => { const e = document.createElement('div'); e.className = 'item ' + type; e.innerHTML = '<span></span><span class="hint"></span>'; e.firstChild.textContent = label; e.lastChild.textContent = type === 'dir' ? '›' : 'select'; e.onclick = fn; list.append(e); };
+  if (d.parent) add('..', 'dir', () => browse(d.parent));
+  d.entries.forEach(en => add(en.name, en.type, () => en.type === 'dir' ? browse(d.path + '/' + en.name) : setSel(d.path + '/' + en.name)));
+  if (!d.entries.length) list.insertAdjacentHTML('beforeend', '<div class="item hint">empty</div>');
+}
+
+$('start').onclick = async () => {
+  $('msg').textContent = '';
+  try {
+    const j = await api('/jobs', {method: 'POST', body: JSON.stringify({
+      path: sel, source_lang: $('src').value.trim(), target_lang: $('tgt').value.trim(),
+      recurse: $('recurse').checked, whisper_fallback: $('whisper').checked, whisper_model: $('model').value,
+      clean_junk: $('clean').checked, force: $('force').checked, notify_jellyfin: $('jf').checked})});
+    selectJob(j.id); refreshJobs();
+  } catch (e) { $('msg').textContent = e.message; }
+};
+
+const fmt = t => t ? new Date(t * 1000).toLocaleString() : '';
+async function refreshJobs() {
+  const js = await api('/jobs');
+  const box = $('jobs'); box.innerHTML = '';
+  if (!js.length) box.textContent = 'No jobs yet.';
+  js.forEach(j => {
+    const e = document.createElement('div'); e.className = 'job' + (j.id === selJob ? ' sel' : '');
+    e.innerHTML = '<span class="badge ' + j.status + '">' + j.status + '</span> <b></b> <span class="hint"></span>';
+    e.children[1].textContent = j.path.split('/').slice(-2).join('/');
+    e.children[2].textContent = fmt(j.created) + (j.error ? ' · ' + j.error : '');
+    e.onclick = () => selectJob(j.id); box.append(e);
+  });
+  const cur = js.find(j => j.id === selJob);
+  if (cur) $('cancel').disabled = !['queued', 'running'].includes(cur.status);
+  if (selJob) pollLog();
+}
+function selectJob(id) { selJob = id; logOff = 0; $('log').textContent = ''; $('detail').hidden = false; $('dtitle').textContent = 'Job ' + id; refreshJobs(); }
+async function pollLog() {
+  const l = await api('/jobs/' + selJob + '/log?offset=' + logOff);
+  if (l.text) { const pre = $('log'), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20; pre.textContent += l.text.replace(/\r/g, '\n'); if (atEnd) pre.scrollTop = pre.scrollHeight; }
+  logOff = l.offset;
+}
+$('cancel').onclick = async () => { try { await api('/jobs/' + selJob, {method: 'DELETE'}); refreshJobs(); } catch (e) { alert(e.message); } };
+
+(async () => {
+  if (!token) return askToken();
+  $('logout').hidden = false;
+  try {
+    const c = await api('/config');
+    $('model').innerHTML = c.whisper_models.map(m => '<option' + (m === 'small' ? ' selected' : '') + '>' + m + '</option>').join('');
+    $('jfRow').hidden = !c.jellyfin;
+    await browse(''); await refreshJobs();
+    setInterval(() => refreshJobs().catch(() => {}), 3000);
+  } catch (e) { $('msg').textContent = e.message; }
+})();
+</script>
+</body>
+</html>

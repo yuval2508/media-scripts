@@ -436,3 +436,31 @@ along the way (see `fix-rtl-subs.sh`'s and the extension-check note above).
 The commit history reflects this as it happened, not after the fact.
 
 MIT licensed - see `LICENSE`.
+
+## Web UI and API (`web/`)
+
+A small FastAPI app that wraps `subs-to-hebrew.sh` (and optionally
+`clean-subtitle-junk.sh`) behind a browser UI and a token-protected JSON
+API. Jobs run one at a time, as the same bash scripts, inside a Docker
+container; paths only (no uploads), restricted to `/mnt/storage01/media`.
+
+```bash
+cd web
+cp .env.example .env     # set API_TOKEN (openssl rand -hex 24); optionally BIND, JELLYFIN_*
+docker compose up -d --build
+```
+
+Open `http://<host>:8080/`. The image bakes in the scripts, so rebuild
+(`docker compose up -d --build`) after changing any `*.sh`. Job state and
+logs live in `web/data/`; the Hugging Face model cache is shared with the
+host's `~/.cache/huggingface`.
+
+API (send `X-API-Token: <token>` or `Authorization: Bearer <token>`):
+
+| Call | Purpose |
+| --- | --- |
+| `GET /api/browse?path=` | list folders/videos under the media root |
+| `POST /api/jobs` | start a job: `path`, `source_lang`, `target_lang`, `recurse`, `whisper_fallback`, `whisper_model`, `clean_junk`, `force`, `notify_jellyfin` |
+| `GET /api/jobs`, `GET /api/jobs/{id}` | status |
+| `GET /api/jobs/{id}/log?offset=N` | incremental log tail |
+| `DELETE /api/jobs/{id}` | cancel (queued or running) |
