@@ -106,12 +106,22 @@ class JobRequest(BaseModel):
     force: bool = False
     notify_jellyfin: bool = False
     rtl_only: bool = False  # only run fix-rtl-subs.sh on existing .srt files
+    sync_timing: bool = False  # align subtitle timing to the video with ffsubsync
 
 
 def build_steps(job: dict) -> list[list[str]]:
     o = job["options"]
     steps = []
+
+    def sync_step(suffix: str) -> list[str]:
+        cmd = [str(SCRIPTS_DIR / "sync-subs.sh"), "-s", suffix]
+        if o["recurse"]:
+            cmd.append("-a")
+        return cmd + ["--", job["path"]]
+
     if o["rtl_only"]:
+        if o["sync_timing"]:  # sync before the RTL marks are added
+            steps.append(sync_step(o["target_lang"]))
         target = job["path"]
         p = Path(target)
         if p.is_file() and p.suffix.lower() != ".srt":  # video -> its sibling subtitle
@@ -129,6 +139,8 @@ def build_steps(job: dict) -> list[list[str]]:
         if o["recurse"]:
             cmd.append("-a")
         steps.append(cmd + ["--", job["path"]])
+    if o["sync_timing"]:  # sync the source subtitle; the translation inherits its timing
+        steps.append(sync_step(o["source_lang"]))
     cmd = [str(SCRIPTS_DIR / "subs-to-hebrew.sh"),
            "-s", o["source_lang"], "-t", o["target_lang"]]
     if o["recurse"]:

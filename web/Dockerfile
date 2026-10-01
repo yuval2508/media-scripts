@@ -13,6 +13,11 @@ RUN python3 -m venv scripts/.venvs/whisper-subs \
     && scripts/.venvs/whisper-subs/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
     && scripts/.venvs/whisper-subs/bin/pip install --no-cache-dir faster-whisper transformers sentencepiece sacremoses
 
+# ffsubsync in its own venv so its numpy pin can't clash with torch's.
+RUN python3 -m venv /opt/ffsubsync \
+    && /opt/ffsubsync/bin/pip install --no-cache-dir ffsubsync \
+    && ln -s /opt/ffsubsync/bin/ffsubsync /usr/local/bin/ffsubsync
+
 COPY web/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY web/app.py ./
