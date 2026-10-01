@@ -1,4 +1,4 @@
-# From this directory:  cp .env.example .env  (set API_TOKEN)  &&  docker compose up -d --build
+# From this directory:  cp .env.example .env  (optional: set API_TOKEN)  &&  docker compose up -d --build
 services:
   subs-web:
     build:
@@ -11,7 +11,7 @@ services:
     ports:
       - "${BIND:-0.0.0.0}:${PORT:-8080}:8080"
     environment:
-      API_TOKEN: ${API_TOKEN:?set API_TOKEN in web/.env}
+      API_TOKEN: ${API_TOKEN:-}
       # Same path as on the host, so Jellyfin path remapping works unchanged.
       MEDIA_ROOT: /mnt/storage01/media
       JELLYFIN_URL: ${JELLYFIN_URL:-}

@@ -38,7 +38,7 @@ VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".ts"}
 LOG_CHUNK = 64 * 1024
 
 if not API_TOKEN:
-    raise RuntimeError("API_TOKEN must be set - refusing to start an open API")
+    print("WARNING: API_TOKEN is not set - the API is open to anyone who can reach this port")
 
 (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
 JOBS_FILE = DATA_DIR / "jobs.json"
@@ -70,6 +70,8 @@ def load_jobs() -> None:
 # --- auth / path safety --------------------------------------------------
 
 def require_token(request: Request) -> None:
+    if not API_TOKEN:  # auth disabled (trusted internal network)
+        return
     supplied = request.headers.get("x-api-token", "")
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
@@ -103,11 +105,21 @@ class JobRequest(BaseModel):
     clean_junk: bool = False
     force: bool = False
     notify_jellyfin: bool = False
+    rtl_only: bool = False  # only run fix-rtl-subs.sh on existing .srt files
 
 
 def build_steps(job: dict) -> list[list[str]]:
     o = job["options"]
     steps = []
+    if o["rtl_only"]:
+        target = job["path"]
+        p = Path(target)
+        if p.is_file() and p.suffix.lower() != ".srt":  # video -> its sibling subtitle
+            target = str(p.with_suffix("")) + f".{o['target_lang']}.srt"
+        cmd = [str(SCRIPTS_DIR / "fix-rtl-subs.sh")]
+        if o["recurse"]:
+            cmd.append("-a")
+        return [cmd + ["--", target]]
     if o["clean_junk"]:
         cmd = [str(SCRIPTS_DIR / "clean-subtitle-junk.sh")]
         if o["recurse"]:
@@ -216,6 +228,8 @@ def browse(path: str = Query("")):
             entries.append({"name": child.name, "type": "dir"})
         elif child.suffix.lower() in VIDEO_EXTS:
             entries.append({"name": child.name, "type": "video"})
+        elif child.suffix.lower() == ".srt":
+            entries.append({"name": child.name, "type": "sub"})
     parent = str(p.parent) if p != MEDIA_ROOT else None
     return {"path": str(p), "parent": parent, "entries": entries}
 

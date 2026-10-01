@@ -446,7 +446,7 @@ container; paths only (no uploads), restricted to `/mnt/storage01/media`.
 
 ```bash
 cd web
-cp .env.example .env     # set API_TOKEN (openssl rand -hex 24); optionally BIND, JELLYFIN_*
+cp .env.example .env     # API_TOKEN is optional (empty = no auth, internal network only); also BIND, JELLYFIN_*
 docker compose up -d --build
 ```
 
@@ -455,7 +455,7 @@ Open `http://<host>:8080/`. The image bakes in the scripts, so rebuild
 logs live in `web/data/`; the Hugging Face model cache is shared with the
 host's `~/.cache/huggingface`.
 
-API (send `X-API-Token: <token>` or `Authorization: Bearer <token>`):
+API (if `API_TOKEN` is set, send `X-API-Token: <token>` or `Authorization: Bearer <token>`; if empty, no auth):
 
 | Call | Purpose |
 | --- | --- |

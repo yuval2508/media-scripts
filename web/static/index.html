@@ -8,6 +8,7 @@
 :root{--bg:#fafaf9;--card:#fff;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706}
 @media (prefers-color-scheme:dark){:root{--bg:#171717;--card:#1f1f1f;--fg:#f5f5f4;--muted:#a8a29e;--line:#333;--accent:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
 main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px}
 h1{font-size:20px;margin:8px 0 0}h2{font-size:15px;margin:0 0 10px}
@@ -26,7 +27,7 @@ label.row input{width:auto}
 .list{border:1px solid var(--line);border-radius:6px;max-height:300px;overflow:auto}
 .item{padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
 .item:last-child{border:0}.item:hover{background:var(--bg)}
-.item.video{color:var(--muted)}
+.item.video,.item.sub{color:var(--muted)}
 .job{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
 .job:last-child{border:0}.job.sel{background:var(--bg)}
 .badge{font-size:12px;border-radius:99px;padding:1px 8px;border:1px solid currentColor}
@@ -51,6 +52,7 @@ pre{background:#0c0a09;color:#e7e5e4;border-radius:6px;padding:10px;max-height:3
 
     <section class="card">
       <h2>2. Options</h2>
+      <label class="row"><input type="checkbox" id="rtl"> Only fix Hebrew/RTL punctuation in existing subtitles (no translation)</label>
       <label class="row"><input type="checkbox" id="recurse" checked> Include subfolders (e.g. all seasons)</label>
       <div class="grid" style="gap:8px">
         <div><div class="hint">Source language</div><input type="text" id="src" value="en"></div>
@@ -96,8 +98,9 @@ function askToken() {
 $('logout').onclick = () => { try { localStorage.removeItem('subs_token'); } catch (e) {} askToken(); };
 
 function setSel(p) { sel = p; $('selected').textContent = p || 'nothing'; $('start').disabled = !p; }
-$('useHere').onclick = () => setSel(curDir);
+$('useHere').onclick = () => { if (curDir) setSel(curDir); };
 $('whisper').onchange = e => $('modelRow').hidden = !e.target.checked;
+$('rtl').onchange = e => ['whisper', 'clean', 'force', 'jf', 'src'].forEach(id => { $(id).disabled = e.target.checked; if (e.target.checked && id !== 'src') $(id).checked = false; $('modelRow').hidden = true; });
 
 async function browse(path) {
   const d = await api('/browse?path=' + encodeURIComponent(path || ''));
@@ -115,7 +118,7 @@ $('start').onclick = async () => {
     const j = await api('/jobs', {method: 'POST', body: JSON.stringify({
       path: sel, source_lang: $('src').value.trim(), target_lang: $('tgt').value.trim(),
       recurse: $('recurse').checked, whisper_fallback: $('whisper').checked, whisper_model: $('model').value,
-      clean_junk: $('clean').checked, force: $('force').checked, notify_jellyfin: $('jf').checked})});
+      clean_junk: $('clean').checked, force: $('force').checked, notify_jellyfin: $('jf').checked, rtl_only: $('rtl').checked})});
     selectJob(j.id); refreshJobs();
   } catch (e) { $('msg').textContent = e.message; }
 };
@@ -145,7 +148,6 @@ async function pollLog() {
 $('cancel').onclick = async () => { try { await api('/jobs/' + selJob, {method: 'DELETE'}); refreshJobs(); } catch (e) { alert(e.message); } };
 
 (async () => {
-  if (!token) return askToken();
   $('logout').hidden = false;
   try {
     const c = await api('/config');
