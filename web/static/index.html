@@ -100,7 +100,7 @@ $('logout').onclick = () => { try { localStorage.removeItem('subs_token'); } cat
 function setSel(p) { sel = p; $('selected').textContent = p || 'nothing'; $('start').disabled = !p; }
 $('useHere').onclick = () => { if (curDir) setSel(curDir); };
 $('whisper').onchange = e => $('modelRow').hidden = !e.target.checked;
-$('rtl').onchange = e => ['whisper', 'clean', 'force', 'jf', 'src'].forEach(id => { $(id).disabled = e.target.checked; if (e.target.checked && id !== 'src') $(id).checked = false; $('modelRow').hidden = true; });
+$('rtl').onchange = e => ['whisper', 'clean', 'force', 'src'].forEach(id => { $(id).disabled = e.target.checked; if (e.target.checked && id !== 'src') $(id).checked = false; $('modelRow').hidden = true; });
 
 async function browse(path) {
   const d = await api('/browse?path=' + encodeURIComponent(path || ''));
@@ -152,7 +152,7 @@ $('cancel').onclick = async () => { try { await api('/jobs/' + selJob, {method: 
   try {
     const c = await api('/config');
     $('model').innerHTML = c.whisper_models.map(m => '<option' + (m === 'small' ? ' selected' : '') + '>' + m + '</option>').join('');
-    $('jfRow').hidden = !c.jellyfin;
+    $('jfRow').hidden = !c.jellyfin; $('jf').checked = c.jellyfin;
     await browse(''); await refreshJobs();
     setInterval(() => refreshJobs().catch(() => {}), 3000);
   } catch (e) { $('msg').textContent = e.message; }

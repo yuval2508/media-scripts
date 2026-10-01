@@ -119,7 +119,11 @@ def build_steps(job: dict) -> list[list[str]]:
         cmd = [str(SCRIPTS_DIR / "fix-rtl-subs.sh")]
         if o["recurse"]:
             cmd.append("-a")
-        return [cmd + ["--", target]]
+        steps.append(cmd + ["--", target])
+        if o["notify_jellyfin"]:
+            d = p if p.is_dir() else p.parent
+            steps.append([str(SCRIPTS_DIR / "notify-jellyfin.sh"), str(d)])
+        return steps
     if o["clean_junk"]:
         cmd = [str(SCRIPTS_DIR / "clean-subtitle-junk.sh")]
         if o["recurse"]:
