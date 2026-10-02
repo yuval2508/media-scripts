@@ -72,7 +72,7 @@ pre{background:#0c0a09;color:#e7e5e4;border-radius:6px;padding:10px;max-height:3
   </div>
 
   <section class="card">
-    <h2>Jobs</h2>
+    <div class="top"><h2>Jobs</h2><button class="ghost" id="clear">Clear finished</button></div>
     <div id="jobs" class="hint">No jobs yet.</div>
     <div id="detail" hidden>
       <div class="top"><b id="dtitle"></b><button class="ghost" id="cancel">Cancel job</button></div>
@@ -146,6 +146,13 @@ async function pollLog() {
   if (l.text) { const pre = $('log'), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20; pre.textContent += l.text.replace(/\r/g, '\n'); if (atEnd) pre.scrollTop = pre.scrollHeight; }
   logOff = l.offset;
 }
+$('clear').onclick = async () => {
+  try {
+    await api('/jobs', {method: 'DELETE'});
+    if (selJob && !document.querySelector('.job.sel .queued, .job.sel .running')) { selJob = null; $('detail').hidden = true; }
+    refreshJobs();
+  } catch (e) { alert(e.message); }
+};
 $('cancel').onclick = async () => { try { await api('/jobs/' + selJob, {method: 'DELETE'}); refreshJobs(); } catch (e) { alert(e.message); } };
 
 (async () => {

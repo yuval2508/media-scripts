@@ -302,6 +302,17 @@ def job_log(jid: str, offset: int = Query(0, ge=0)):
     return {"offset": offset + len(data), "text": data.decode("utf-8", "replace")}
 
 
+@app.delete("/api/jobs", dependencies=[Depends(require_token)])
+def clear_finished():
+    """Remove every done/failed/cancelled job (and its log); queued/running stay."""
+    gone = [jid for jid, j in jobs.items() if j["status"] in ("done", "failed", "cancelled")]
+    for jid in gone:
+        del jobs[jid]
+        (DATA_DIR / "logs" / f"{jid}.log").unlink(missing_ok=True)
+    save_jobs()
+    return {"removed": len(gone)}
+
+
 @app.delete("/api/jobs/{jid}", dependencies=[Depends(require_token)])
 def cancel_job(jid: str):
     job = get_job(jid)
