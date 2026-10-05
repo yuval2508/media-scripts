@@ -108,8 +108,8 @@ JELLYFIN_TOKEN_FILE="$HOME/.config/jellyfin/token"
 if [[ -f "$JELLYFIN_TOKEN_FILE" ]]; then
     if ask_yn "Notify Jellyfin to rescan when done?" "y"; then
         NOTIFY_JELLYFIN=1
-        JELLYFIN_URL=$(ask_value "Jellyfin URL" "http://192.168.0.2:8096")
-        JELLYFIN_HOST_PREFIX=$(ask_value "Host-side path prefix to remap (leave as-is if unsure)" "/mnt/storage01/media")
+        JELLYFIN_URL=$(ask_value "Jellyfin URL" "http://localhost:8096")
+        JELLYFIN_HOST_PREFIX=$(ask_value "Host-side path prefix to remap (leave as-is if unsure)" "/media")
         JELLYFIN_CONTAINER_PREFIX=$(ask_value "Container-side replacement prefix" "/data")
     fi
 else

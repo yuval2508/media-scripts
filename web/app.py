@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", "/app/scripts"))
-MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/mnt/storage01/media")).resolve()
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 API_TOKEN = os.environ.get("API_TOKEN", "")
 

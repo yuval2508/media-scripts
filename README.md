@@ -1,6 +1,6 @@
 # Media-Scripts (Subtitles extraction)
 
-Personal shell scripts for managing a media library: pulling embedded
+Shell scripts (plus a Docker web UI) for managing a media library: pulling embedded
 subtitles out of video files, generating subtitles from audio when there's
 nothing embedded, machine-translating them, cleaning up common quality
 issues, and fixing RTL (Hebrew/Arabic) subtitle rendering issues.
@@ -15,6 +15,60 @@ For the common case - translating a whole library into Hebrew - use
 `subs-to-hebrew.sh` (below), which sequences all of these for you. The
 individual scripts are documented here for when you want a single stage on
 its own, or a different target language than Hebrew.
+
+## Quick start: web UI in Docker (recommended)
+
+The easiest way to use this is the web UI, packaged as a Docker image with
+everything inside (ffmpeg, Whisper, the translation model, ffsubsync) - nothing
+to install on the host except Docker.
+
+```bash
+git clone https://github.com/yuval2508/media-scripts.git
+cd media-scripts/web
+cp .env.example .env      # set MEDIA_DIR to your media folder, at minimum
+docker compose up -d
+```
+
+Open <http://localhost:8080>, pick a show or folder, choose options, start a
+job. The first translation downloads two AI models (~800 MB) into a Docker
+volume; later runs reuse them. Everything runs on CPU - a 45-minute episode
+translates in about a minute, but Whisper transcription (only used when a video
+has no subtitle track at all) is slow.
+
+Things to know before you expose it:
+
+- **No login by default, localhost only.** The API can write into your media
+  library, so it listens on `127.0.0.1` unless you set `BIND`. Setting
+  `BIND=0.0.0.0` on a trusted home network is fine; don't put it on the
+  internet. Set `API_TOKEN` in `.env` to require a token.
+- **File ownership.** Set `PUID`/`PGID` to the owner of your media files.
+- **Jellyfin** (optional): set `JELLYFIN_URL` and `JELLYFIN_TOKEN` and the UI gets
+  a "notify Jellyfin" option. If Jellyfin mounts your media at a different path,
+  set `JELLYFIN_LIBRARY_PATH` (e.g. `/data`).
+- If the published image can't be pulled, Compose builds it from the checkout
+  automatically (a few minutes; ~3 GB because of PyTorch).
+
+### API
+
+If `API_TOKEN` is set, send `X-API-Token: <token>` or `Authorization: Bearer
+<token>`.
+
+| Call | Purpose |
+| --- | --- |
+| `GET /api/browse?path=` | list folders/videos/subtitles under the media root |
+| `POST /api/jobs` | start a job: `path`, `source_lang`, `target_lang`, `recurse`, `whisper_fallback`, `whisper_model`, `clean_junk`, `sync_timing`, `force`, `notify_jellyfin`, `rtl_only` |
+| `GET /api/jobs`, `GET /api/jobs/{id}` | status |
+| `GET /api/jobs/{id}/log?offset=N` | incremental log tail |
+| `DELETE /api/jobs/{id}` | cancel (queued or running) |
+| `DELETE /api/jobs` | clear finished jobs and their logs |
+
+Jobs run one at a time, as the same bash scripts documented below, so anything
+the web UI does you can also do from the command line.
+
+## Contributing
+
+Bug reports, new language support, better translation models and UI polish are
+all welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Scripts
 
@@ -349,26 +403,26 @@ real gotchas found while building it:
   key.
 - **Docker path remapping**: if Jellyfin runs in a container, the path it
   needs is whatever the container sees (e.g. `/data/tvshows/...`), not the
-  host path (e.g. `/mnt/storage01/media/tv/...`) - these are commonly
+  host path (e.g. `/srv/media/tv/...`) - these are commonly
   different even though they point at the same files.
 
 Configuration is via environment variables, not flags, since they're the
 same for every call:
 
 ```
-JELLYFIN_URL              base URL, e.g. http://192.168.0.2:8096 (required)
+JELLYFIN_URL              base URL, e.g. http://jellyfin.local:8096 (required)
 JELLYFIN_TOKEN            API key from Settings -> Advanced -> API Keys (required)
 JELLYFIN_HOST_PREFIX      host-side path prefix to strip (optional)
 JELLYFIN_CONTAINER_PREFIX replacement prefix, as Jellyfin itself sees it (optional)
 ```
 
 ```bash
-export JELLYFIN_URL=http://192.168.0.2:8096
+export JELLYFIN_URL=http://jellyfin.local:8096
 export JELLYFIN_TOKEN=your-api-key-here
-export JELLYFIN_HOST_PREFIX=/mnt/storage01/media   # only needed for a
+export JELLYFIN_HOST_PREFIX=/srv/media   # only needed for a
 export JELLYFIN_CONTAINER_PREFIX=/data              # containerized server
 
-notify-jellyfin.sh "/mnt/storage01/media/tv/Some Show/Season 01"
+notify-jellyfin.sh "/srv/media/tv/Some Show/Season 01"
 ```
 
 Restarting playback client-side (not just seeking/resuming) is still worth
@@ -422,7 +476,7 @@ subs-to-hebrew.sh -a --whisper-fallback "/media/tv/Some Show"
 subs-to-hebrew.sh -a -t fr "/media/tv/Some Show"
 
 # Also notify Jellyfin when done, so it doesn't serve a stale cached subtitle
-export JELLYFIN_URL=http://192.168.0.2:8096
+export JELLYFIN_URL=http://jellyfin.local:8096
 export JELLYFIN_TOKEN=your-api-key-here
 subs-to-hebrew.sh -a "/media/tv/Some Show"
 ```
@@ -436,31 +490,3 @@ along the way (see `fix-rtl-subs.sh`'s and the extension-check note above).
 The commit history reflects this as it happened, not after the fact.
 
 MIT licensed - see `LICENSE`.
-
-## Web UI and API (`web/`)
-
-A small FastAPI app that wraps `subs-to-hebrew.sh` (and optionally
-`clean-subtitle-junk.sh`) behind a browser UI and a token-protected JSON
-API. Jobs run one at a time, as the same bash scripts, inside a Docker
-container; paths only (no uploads), restricted to `/mnt/storage01/media`.
-
-```bash
-cd web
-cp .env.example .env     # API_TOKEN is optional (empty = no auth, internal network only); also BIND, JELLYFIN_*
-docker compose up -d --build
-```
-
-Open `http://<host>:8080/`. The image bakes in the scripts, so rebuild
-(`docker compose up -d --build`) after changing any `*.sh`. Job state and
-logs live in `web/data/`; the Hugging Face model cache is shared with the
-host's `~/.cache/huggingface`.
-
-API (if `API_TOKEN` is set, send `X-API-Token: <token>` or `Authorization: Bearer <token>`; if empty, no auth):
-
-| Call | Purpose |
-| --- | --- |
-| `GET /api/browse?path=` | list folders/videos under the media root |
-| `POST /api/jobs` | start a job: `path`, `source_lang`, `target_lang`, `recurse`, `whisper_fallback`, `whisper_model`, `clean_junk`, `force`, `notify_jellyfin` |
-| `GET /api/jobs`, `GET /api/jobs/{id}` | status |
-| `GET /api/jobs/{id}/log?offset=N` | incremental log tail |
-| `DELETE /api/jobs/{id}` | cancel (queued or running) |

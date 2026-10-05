@@ -23,6 +23,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY web/app.py ./
 COPY web/static static/
 
+# World-writable so named volumes mounted here work for whatever PUID/PGID runs the container.
+RUN mkdir -p /data /cache && chmod 777 /data /cache
+
+LABEL org.opencontainers.image.source="https://github.com/yuval2508/media-scripts" \
+      org.opencontainers.image.description="Web UI and API for the media-scripts subtitle pipeline" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV SCRIPTS_DIR=/app/scripts DATA_DIR=/data HF_HOME=/cache HOME=/tmp
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

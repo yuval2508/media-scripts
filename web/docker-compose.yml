@@ -1,24 +1,45 @@
-# From this directory:  cp .env.example .env  (optional: set API_TOKEN)  &&  docker compose up -d --build
+# Quick start (from this directory):
+#   cp .env.example .env     # set MEDIA_DIR at minimum
+#   docker compose up -d
+# then open http://localhost:8080  (see .env.example for every setting)
 services:
   subs-web:
+    image: ${SUBS_IMAGE:-ghcr.io/yuval2508/media-scripts:latest}
+    # If the image can't be pulled, Compose builds it from this checkout.
     build:
       context: ..
       dockerfile: web/Dockerfile
-    image: subs-web
     container_name: subs-web
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      - "${BIND:-0.0.0.0}:${PORT:-8080}:8080"
+      # Default is localhost-only on purpose: the API can write into your media
+      # library and has no login unless API_TOKEN is set. Set BIND=0.0.0.0 (or
+      # your LAN IP) only on a network you trust.
+      - "${BIND:-127.0.0.1}:${PORT:-8080}:8080"
     environment:
       API_TOKEN: ${API_TOKEN:-}
-      # Same path as on the host, so Jellyfin path remapping works unchanged.
-      MEDIA_ROOT: /mnt/storage01/media
-      JELLYFIN_URL: ${JELLYFIN_URL:-http://192.168.0.2:8096}
+      # The media library is mounted at the same path inside the container as
+      # on the host, so paths in the UI/logs match what you see on the host.
+      MEDIA_ROOT: ${MEDIA_DIR:?set MEDIA_DIR in .env to your media folder (absolute path, no trailing slash)}
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
       JELLYFIN_TOKEN: ${JELLYFIN_TOKEN:-}
-      JELLYFIN_HOST_PREFIX: /mnt/storage01/media
-      JELLYFIN_CONTAINER_PREFIX: ${JELLYFIN_CONTAINER_PREFIX:-/data}
+      # Path remap: how Jellyfin itself sees MEDIA_DIR (e.g. /data). Leave empty
+      # if Jellyfin sees the same path as this host.
+      JELLYFIN_HOST_PREFIX: ${MEDIA_DIR}
+      JELLYFIN_CONTAINER_PREFIX: ${JELLYFIN_LIBRARY_PATH:-}
     volumes:
-      - /mnt/storage01/media:/mnt/storage01/media
-      - ./data:/data
-      - ${HOME}/.cache/huggingface:/cache
+      - ${MEDIA_DIR}:${MEDIA_DIR}
+      # Job history/logs and the downloaded AI models. Named volumes by default;
+      # set DATA_DIR / HF_CACHE to a host path (e.g. ./data) to bind-mount instead.
+      - ${DATA_DIR:-subs-data}:/data
+      - ${HF_CACHE:-hf-cache}:/cache
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  subs-data:
+  hf-cache:

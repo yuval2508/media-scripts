@@ -11,7 +11,7 @@
 # Configuration is via environment variables (not flags, since these are
 # the same for every call and you don't want to retype them):
 #
-#   JELLYFIN_URL              base URL, e.g. http://192.168.0.2:8096 (required)
+#   JELLYFIN_URL              base URL, e.g. http://jellyfin.local:8096 (required)
 #   JELLYFIN_TOKEN            API key from Jellyfin's dashboard under
 #                             Settings -> Advanced -> API Keys (required)
 #   JELLYFIN_HOST_PREFIX      host-side path prefix to strip (optional)
@@ -20,8 +20,8 @@
 #
 # The HOST_PREFIX/CONTAINER_PREFIX pair only matters if Jellyfin runs in a
 # container with different internal paths than the host filesystem - e.g.
-# a host directory /mnt/storage01/media/tv mounted into the container at
-# /data/tvshows needs JELLYFIN_HOST_PREFIX=/mnt/storage01/media and
+# a host directory /srv/media/tv mounted into the container at
+# /data/tvshows needs JELLYFIN_HOST_PREFIX=/srv/media and
 # JELLYFIN_CONTAINER_PREFIX=/data so that a call with a host path gets
 # rewritten to what Jellyfin's API actually expects. Leave both unset for
 # a native (non-container) Jellyfin install, where paths match as-is.
@@ -31,11 +31,11 @@
 # gets silently rejected with 401 on newer servers.
 #
 # Example:
-#   export JELLYFIN_URL=http://192.168.0.2:8096
+#   export JELLYFIN_URL=http://jellyfin.local:8096
 #   export JELLYFIN_TOKEN=your-api-key-here
-#   export JELLYFIN_HOST_PREFIX=/mnt/storage01/media
+#   export JELLYFIN_HOST_PREFIX=/srv/media
 #   export JELLYFIN_CONTAINER_PREFIX=/data
-#   notify-jellyfin.sh "/mnt/storage01/media/tv/Some Show/Season 01"
+#   notify-jellyfin.sh "/srv/media/tv/Some Show/Season 01"
 
 set -euo pipefail
 
