@@ -80,6 +80,7 @@ all welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 | [`whisper-transcribe.sh`](#whisper-transcribesh) | Transcribe audio to `.srt` with faster-whisper, for files with nothing embedded |
 | [`translate-srt.sh`](#translate-srtsh) | Machine-translate an existing `.srt` into another language, keeping timestamps |
 | [`cap-subtitle-duration.sh`](#cap-subtitle-durationsh) | Clip subtitle lines that linger on screen far longer than their text needs |
+| [`bridge-subtitle-gaps.sh`](#bridge-subtitle-gapssh) | Close the blank gap Whisper leaves when it splits one spoken sentence across two subtitle blocks |
 | [`wrap-subtitle-lines.sh`](#wrap-subtitle-linessh) | Wrap long single-line subtitles into two balanced lines |
 | [`fix-rtl-subs.sh`](#fix-rtl-subssh) | Fix Hebrew/Arabic punctuation rendering on players that force LTR paragraph direction |
 | [`notify-jellyfin.sh`](#notify-jellyfinsh) | Tell a Jellyfin server to rescan a path after subtitles change, so it doesn't serve a stale cached version |
@@ -359,6 +360,40 @@ cap-subtitle-duration.sh [-a] [--min SEC] [--max SEC] [--cps N] FILE_OR_DIR...
 
 Safe to re-run — it only ever shortens, so a second pass on already-capped
 durations is a no-op.
+
+## bridge-subtitle-gaps.sh
+
+Fixes a Whisper segmentation artifact: one continuous sentence cut into two
+subtitle blocks with a few seconds of blank screen between them, even though the
+speaker never stopped talking ("...good then at last I" / 7.5 s blank / "will
+get a new body..."). Both halves have a subtitle; they're just separated by a
+gap that reads as broken.
+
+A gap is bridged when it is shorter than `--max-gap` **and** the next block's
+text starts with a lowercase letter - a strong sign the sentence is continuing.
+The first block's end time is then extended to meet the second block's start.
+Text is never touched, and times are only ever extended, never shortened.
+
+The lowercase check only makes sense in the source language, so the script reads
+`<base>.en.srt` (or `--source-lang`) to decide *which* blocks to bridge, then
+applies the same timestamp change, by block index, to every sibling
+`<base>.*.srt` - `translate-srt.sh` keeps timestamps 1:1 per block, so the
+translations stay aligned.
+
+```
+bridge-subtitle-gaps.sh [-a] [--source-lang LANG] [--max-gap SEC] FILE_OR_DIR...
+
+  -a             recurse into directories looking for *.LANG.srt
+  --source-lang  language of the reference transcript (default: en)
+  --max-gap SEC  only bridge gaps up to this long (default: 10.0); a longer gap
+                 is more likely a real pause than a split sentence
+```
+
+This is **not** run by `subs-to-hebrew.sh`. Run it yourself, after
+`cap-subtitle-duration.sh` (so the duration cap doesn't clip the bridged line
+straight back down) and before `wrap-subtitle-lines.sh` / `fix-rtl-subs.sh`. It
+is most useful on Whisper-generated subtitles; it has little to do on tracks
+extracted from a video. Safe to re-run - a second pass finds no gaps left.
 
 ## wrap-subtitle-lines.sh
 
