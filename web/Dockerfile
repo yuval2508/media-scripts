@@ -6,7 +6,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY *.sh scripts/
 
 # Same venv layout the scripts expect (.venvs/whisper-subs next to them).
 RUN python3 -m venv scripts/.venvs/whisper-subs \
@@ -20,6 +19,8 @@ RUN python3 -m venv /opt/ffsubsync \
 
 COPY web/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Scripts and app code come last so editing them never invalidates the heavy layers above.
+COPY *.sh scripts/
 COPY web/app.py ./
 COPY web/static static/
 

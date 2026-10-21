@@ -75,6 +75,7 @@ all welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Script | What it does |
 | --- | --- |
 | [`extract-subs.sh`](#extract-subssh) | Pull an already-embedded subtitle track out of a video file - the cheap, accurate option when one exists |
+| [`strip-hi.sh`](#strip-hish) | Convert a hearing-impaired (SDH) subtitle into a normal one - removes sound descriptions like `(LAUGHS)` and speaker labels like `BELLA:` |
 | [`sync-subs.sh`](#sync-subssh) | Align an externally-sourced subtitle's timing to the actual video with `ffsubsync`, for tracks that didn't come from `extract-subs.sh` itself |
 | [`whisper-transcribe.sh`](#whisper-transcribesh) | Transcribe audio to `.srt` with faster-whisper, for files with nothing embedded |
 | [`translate-srt.sh`](#translate-srtsh) | Machine-translate an existing `.srt` into another language, keeping timestamps |
@@ -138,8 +139,10 @@ every run after that is fully offline.
 
 Pulls the embedded subtitle track out of one or more MKV/MP4/M4V files using
 `ffprobe`/`ffmpeg`. Prefers a clean (non hearing-impaired) track, but falls
-back to an SDH/HI one if that's all a file has. Always try this before
-transcribing audio — it's faster and more accurate than Whisper when a
+back to an SDH/HI one if that's all a file has, which it then converts into a
+normal subtitle with [`strip-hi.sh`](#strip-hish) (so you end up with
+`<base>.en.srt`, the file `translate-srt.sh` looks for, not `<base>.en.hi.srt`).
+Always try this before transcribing audio — it's faster and more accurate than Whisper when a
 usable track already exists.
 
 Text-based subtitle codecs (SubRip/ASS/SSA/MOV_TEXT/WebVTT) are converted to
@@ -149,7 +152,7 @@ Text-based subtitle codecs (SubRip/ASS/SSA/MOV_TEXT/WebVTT) are converted to
 no standalone VobSub muxer).
 
 ```
-extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--force] FILE_OR_DIR...
+extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--keep-hi] [--force] FILE_OR_DIR...
 
   -l LANG      ISO 639-2 language code to match in the file (default: eng)
   -s SUFFIX    filename suffix for the output file (default: derived from
@@ -158,6 +161,8 @@ extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--force] FILE_
   -a           recurse into directories looking for *.mkv/*.mp4/*.m4v
   --no-hi      skip a file entirely if only a hearing-impaired/SDH track
                exists, instead of falling back to it
+  --keep-hi    keep an extracted hearing-impaired track as <base>.en.hi.srt
+               instead of converting it to a normal subtitle
   --force      overwrite existing output files
 ```
 
@@ -168,6 +173,40 @@ extract-subs.sh -a "/media/tv/Some Show/Season 01"
 # Extract French subs, custom suffix, into a separate output dir
 extract-subs.sh -l fre -s fr -o /tmp/subs -a /media/tv/Some\ Show
 ```
+
+## strip-hi.sh
+
+Converts a hearing-impaired (SDH) subtitle into a normal one:
+`<base>.en.hi.srt` becomes `<base>.en.srt`. SDH tracks carry text that isn't
+speech - sound cues like `(LAUGHS)`, `(SPEAKING ITALIAN)` or `[door slams]` and
+speaker labels like `BELLA: ...` - which would otherwise be translated and shown
+as if it were dialogue. Also, `translate-srt.sh` only looks for `<base>.SRC.srt`,
+so a lone `.hi.srt` is never translated at all.
+
+Removed: `[bracketed]` groups, `(PARENTHESISED)` groups that are ALL CAPS or a
+whole line on their own, ALL-CAPS speaker labels, and any cue left empty
+afterwards (the rest are renumbered). Timing, `♪` lyrics and `<i>` markup are
+untouched. It is deliberately conservative - a missed annotation is a minor
+annoyance, a deleted line of dialogue is a bug - so spot-check the result. One
+known limitation: an ALL-CAPS shouted line with a colon ("STOP: THIS IS WRONG")
+loses its first word.
+
+`extract-subs.sh` and `subs-to-hebrew.sh` run this for you; use it directly for
+`.hi.srt` files that are already on disk.
+
+```
+strip-hi.sh [-a] [--in-place] [--keep-original] [--force] FILE_OR_DIR...
+
+  -a                recurse into directories looking for *.hi.srt
+  --in-place        clean any .srt in place without renaming it (for a
+                    downloaded SDH subtitle that isn't named .hi.srt)
+  --keep-original   keep the .hi.srt after converting it (default: remove it)
+  --force           replace an existing <base>.en.srt. Without it, if a normal
+                    subtitle already exists the .hi.srt is left alone.
+```
+
+If cleaning would leave no cues at all, nothing is written and the original is
+kept.
 
 ## sync-subs.sh
 
@@ -432,7 +471,7 @@ regardless of what the server knows.
 
 ## subs-to-hebrew.sh
 
-Orchestrates the full pipeline in one command: `extract-subs.sh` →
+Orchestrates the full pipeline in one command: `extract-subs.sh` → `strip-hi.sh` →
 (optionally `whisper-transcribe.sh`) → `translate-srt.sh` →
 `cap-subtitle-duration.sh` → `wrap-subtitle-lines.sh` → `fix-rtl-subs.sh`.
 Despite the name, the target language is a flag, not hardcoded — it just

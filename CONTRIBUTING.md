@@ -14,13 +14,14 @@ better for other languages and setups are especially welcome.
 | `web/app.py` | FastAPI app: job queue, folder browser, log tailing. Shells out to the scripts with argument lists. |
 | `web/static/index.html` | The whole UI - one file, no build step. |
 | `web/tests/` | pytest suite for the web app. Uses fake scripts, so it needs no ffmpeg, models or media. |
+| `tests/` | pytest tests that run the real shell scripts that only need bash + python3 (currently `strip-hi.sh`). |
 | `web/Dockerfile`, `web/docker-compose.yml` | The packaged deployment. |
 
 ## Running the tests
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r web/requirements-dev.txt
-.venv/bin/python -m pytest web/tests
+.venv/bin/python -m pytest tests web/tests
 ```
 
 CI also runs `shellcheck --severity=error *.sh` and a Docker build on every pull

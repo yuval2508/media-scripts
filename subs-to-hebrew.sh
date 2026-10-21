@@ -22,7 +22,7 @@
 #   --force             forwarded to every stage - overwrite existing
 #                       outputs and redo every step even if already done
 #
-# Runs, in order: extract-subs.sh -> [whisper-transcribe.sh] ->
+# Runs, in order: extract-subs.sh -> strip-hi.sh -> [whisper-transcribe.sh] ->
 # translate-srt.sh -> cap-subtitle-duration.sh -> wrap-subtitle-lines.sh ->
 # fix-rtl-subs.sh -> [notify-jellyfin.sh]. Every stage is independently safe
 # to skip files it has nothing to do for, so this is resumable the same way
@@ -125,6 +125,21 @@ run_stage() {
 
 run_stage "extract-subs.sh" \
     "$SCRIPT_DIR/extract-subs.sh" -l "$(iso_639_2 "$SRC")" -s "$SRC" "${FLAGS[@]}" "${ARGS[@]}"
+
+# Turn any <base>.SRC.hi.srt (hearing-impaired) into a normal <base>.SRC.srt, so
+# translation sees it and the Whisper fallback doesn't transcribe a video that
+# already has subtitles. extract-subs.sh does this itself for tracks it pulls
+# out; this catches .hi.srt files that were already on disk. Deliberately gets
+# only -a, never --force: a forced run must not replace a good existing .SRC.srt
+# with one derived from its hearing-impaired twin.
+HI_FLAGS=()
+[[ $RECURSE -eq 1 ]] && HI_FLAGS+=(-a)
+HI_ARGS=()
+for a in "${ARGS[@]}"; do
+    if [[ -d "$a" ]]; then HI_ARGS+=("$a"); else HI_ARGS+=("${a%.*}.$SRC.hi.srt"); fi
+done
+run_stage "strip-hi.sh" \
+    "$SCRIPT_DIR/strip-hi.sh" "${HI_FLAGS[@]}" "${HI_ARGS[@]}"
 
 if [[ $WHISPER_FALLBACK -eq 1 ]]; then
     run_stage "whisper-transcribe.sh" \

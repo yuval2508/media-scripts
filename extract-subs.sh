@@ -3,10 +3,10 @@
 # extract-subs.sh — pull the embedded English subtitle track out of one or
 # more MKV/MP4/M4V files using ffprobe/ffmpeg. Prefers a clean track, but
 # falls back to a hearing-impaired/SDH one if that's all a file has (see
-# --no-hi).
+# --no-hi), converting it to a normal subtitle with strip-hi.sh (see --keep-hi).
 #
 # Usage:
-#   extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--force] FILE_OR_DIR...
+#   extract-subs.sh [-l LANG] [-s SUFFIX] [-o OUTDIR] [-a] [--no-hi] [--keep-hi] [--force] FILE_OR_DIR...
 #
 #   -l LANG      ISO 639-2 language code to match in the file (default: eng)
 #   -s SUFFIX    filename suffix to use for the output file (default: derived
@@ -15,6 +15,10 @@
 #   -a           recurse into directories looking for *.mkv/*.mp4/*.m4v
 #   --no-hi      skip a file entirely if only a hearing-impaired/SDH track
 #                exists, instead of falling back to it
+#   --keep-hi    keep an extracted hearing-impaired track as-is, as
+#                <base>.en.hi.srt, instead of converting it (default: strip the
+#                sound descriptions and speaker labels and save it as the
+#                normal <base>.en.srt, which is what translate-srt.sh looks for)
 #   --force      overwrite existing output files
 #
 # Text-based subtitle codecs (SubRip/ASS/SSA/MOV_TEXT) are extracted as .srt.
@@ -30,11 +34,13 @@ SUFFIX=""
 OUTDIR=""
 RECURSE=0
 ALLOW_HI=1
+CONVERT_HI=1
 FORCE=0
 FILES=()
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    grep '^#' "$0" | sed -n '2,20p' | sed 's/^# \{0,1\}//'
+    grep '^#' "$0" | sed -n '2,24p' | sed 's/^# \{0,1\}//'
     exit 1
 }
 
@@ -62,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         -o) OUTDIR="$2"; shift 2 ;;
         -a) RECURSE=1; shift ;;
         --no-hi) ALLOW_HI=0; shift ;;
+        --keep-hi) CONVERT_HI=0; shift ;;
         --force) FORCE=1; shift ;;
         -h|--help) usage ;;
         --) shift; FILES+=("$@"); break ;;
@@ -192,6 +199,19 @@ extract_one() {
         return
     fi
 
+    # A hearing-impaired text track is converted to the normal name right after
+    # extraction (and the .hi.srt removed), so on a re-run it's the converted
+    # file that tells us this video is already done.
+    local convert_hi=0 normal_out=""
+    if [[ "$is_hi" == "true" && "$out_ext" == "srt" && $CONVERT_HI -eq 1 ]]; then
+        convert_hi=1
+        normal_out="$outdir/${base}.${suffix%.hi}.srt"
+        if [[ -e "$normal_out" && $FORCE -eq 0 ]]; then
+            echo "skip: $normal_out already exists (use --force to overwrite)" >&2
+            return
+        fi
+    fi
+
     local ff_overwrite="-n"
     [[ $FORCE -eq 1 ]] && ff_overwrite="-y"
 
@@ -207,6 +227,15 @@ extract_one() {
             sed -i -E -e 's/\{\\[^}]*\}//g' -e 's/<\/?font[^>]*>//gI' "$outfile"
         fi
         echo "ok:   $file -> $outfile"
+        if [[ $convert_hi -eq 1 ]]; then
+            local -a strip_args=()
+            [[ $FORCE -eq 1 ]] && strip_args+=(--force)
+            if "$SCRIPT_DIR/strip-hi.sh" "${strip_args[@]}" "$outfile" >&2; then
+                echo "ok:   hearing-impaired track converted -> $normal_out"
+            else
+                echo "warn: could not convert $outfile; left as-is (rerun strip-hi.sh on it)" >&2
+            fi
+        fi
     else
         echo "fail: $file (stream $idx, codec $codec)" >&2
     fi

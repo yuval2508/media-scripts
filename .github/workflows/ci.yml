@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r web/requirements-dev.txt
-      - run: python -m pytest web/tests -q
+      - run: python -m pytest tests web/tests -q
 
   docker-build:
     runs-on: ubuntu-latest
